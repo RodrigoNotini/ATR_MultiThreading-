@@ -4,7 +4,7 @@
 #include <sstream>
 
 namespace atr {
-
+	//Converte Msg11 e Msg44 para o formato ASCII especificado
 std::string Msg11::serialize_ascii() const {
     std::ostringstream oss;
     // "11/NSEQ/TIMESTAMP/ID/GR_MED/GR_MAX/GR_MIN/SIGMA"
@@ -19,6 +19,7 @@ std::string Msg11::serialize_ascii() const {
     return oss.str();
 }
 
+    //Converte Msg44 para o formato ASCII especificado
 std::string Msg44::serialize_ascii() const {
     std::ostringstream oss;
     // "44/NSEQ/ID/TIMESTAMP/VEL/INCL/POT/VZ_ENT/VZ_SAIDA"

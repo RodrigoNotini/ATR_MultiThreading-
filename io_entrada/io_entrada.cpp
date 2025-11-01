@@ -1,18 +1,28 @@
-
+#define NOMINMAX
 #include "messages.hpp"
 #include "utils.hpp"
 #include "globals.hpp"
+#include "shared_layout.hpp"
 #include <windows.h>
 #include <thread>
 #include <random>
 #include <sstream>
 #include <iostream>
+#include <algorithm>
+
 
 // Empilha em L1 com aviso se estiver cheia
 // Empilha em L1; retorna false se quit foi sinalizado (não empilhou)
 // Empilha em L1; retorna false se QUIT foi sinalizado (não empilhou)
 // Agora respeita on/off (evtRun) durante toda a execução.
-static bool push_L1_blocking(const std::string& s, const char* produtor_tag, HANDLE evtRun) {
+
+static BYTE* slot_ptr(atr::SharedRing* r, LONG idx) {
+    const LONG cap = r->hdr.capacity;
+    const LONG pos = idx % cap; // se cap potência de 2, pode usar & (cap-1)
+    return const_cast<BYTE*>(&r->data[0]) + size_t(pos) * r->hdr.msg_size;
+}
+
+static bool push_L1_blocking(const std::string& s, const char* produtor_tag,HANDLE evtRun) {
     for (;;) {
         // Se estiver PAUSADO, espera RUN ou QUIT
         if (WaitForSingleObject(evtRun, 0) != WAIT_OBJECT_0) {
@@ -54,15 +64,31 @@ static bool push_L1_blocking(const std::string& s, const char* produtor_tag, HAN
             continue;
         }
 
-        // Espera pela mutex para conseguir acesso ao buffer
-		WaitForSingleObject(atr::mutexL1, INFINITE);
-        atr::g_buf_L1[atr::g_tail_L1] = s;
-        std::cout << "Elemento adicionado na L1: " << atr::g_buf_L1[atr::g_tail_L1] << std::endl;
-        atr::g_tail_L1 = (atr::g_tail_L1 + 1) % atr::g_cap_L1;
-        ++atr::g_count_L1;
-		ReleaseMutex(atr::mutexL1);
+        WaitForSingleObject(atr::mutexL1, INFINITE);
 
-        // Um item a mais disponível
+        // salve o head atual para usar no log e no slot_ptr
+        const LONG h = atr::g_B1->hdr.head;
+        BYTE* dst = slot_ptr(atr::g_B1, h);
+
+        // zera e copia até MSG_SZ-1, garante '\0'
+        const size_t cap = size_t(atr::g_B1->hdr.msg_size);
+        memset(dst, 0, cap);
+        const size_t n = std::min(s.size(), cap ? cap - 1 : 0);
+        memcpy(dst, s.data(), n);
+
+        // LOG: índice lógico, índice físico (h % capacity), bytes e texto
+        const LONG idx_fisico = h % atr::g_B1->hdr.capacity;
+        const char* pushed = reinterpret_cast<const char*>(dst);
+
+        // (a) log textual seguro: limita ao tamanho n
+        std::cout << "[produtor " << produtor_tag << "] "
+            << "L1 push idx=" << h
+            << " (fis=" << idx_fisico << "), bytes=" << n
+            << ", msg=\"" << std::string(pushed, n) << "\"\n";
+
+        atr::g_B1->hdr.head = h + 1;
+        ReleaseMutex(atr::mutexL1);
+
         ReleaseSemaphore(atr::g_semItems_L1, 1, nullptr);
         return true;
     }
@@ -97,7 +123,8 @@ DWORD WINAPI thr_msg11(LPVOID) {
 
         // 3) Produz e tenta empilhar (push_L1_blocking já respeita QUIT)
         auto m11 = atr::make_random_msg11(/*seed*/123, /*n*/2);
-        if (!push_L1_blocking(m11.serialize_ascii(), "prod_11",atr::g_evtRunMedicao)) break;
+        const std::string msg_str = m11.serialize_ascii();
+        if (!push_L1_blocking(msg_str, "prod_11", atr::g_evtRunMedicao)) break;
 
         // 4) Espera o período, saindo cedo se QUIT for sinalizado
         DWORD T_ms = static_cast<DWORD>(dist_ms(rng));
@@ -127,7 +154,8 @@ DWORD WINAPI thr_msg44(LPVOID) {
 
         // 3) Produz e tenta empilhar (push_L1_blocking já trata QUIT)
         auto m44 = atr::make_random_msg44(/*seed*/456, /*n*/5);
-        if (!push_L1_blocking(m44.serialize_ascii(), "prod_44",atr::g_evtRunCLP)) break;
+        const std::string msg_str = m44.serialize_ascii();
+        if (!push_L1_blocking(msg_str, "prod_44",atr::g_evtRunCLP)) break;
 
         // 4) Espera o período, saindo cedo se QUIT for sinalizado
         if (!wait_period_or_quit(T_ms)) break;
@@ -144,11 +172,15 @@ int main() {
     HANDLE h11 = CreateThread(nullptr, 0, thr_msg11, nullptr, 0, nullptr);
     HANDLE h44 = CreateThread(nullptr, 0, thr_msg44, nullptr, 0, nullptr);
 
-    HANDLE hs[2] = { h11, h44 };
-    // Espera pela sinalização dos 2 objetos definidos no vetor de handles durante tempo infinito
-    WaitForMultipleObjects(2, hs, TRUE, INFINITE);
-	CloseHandle(h11);
-	CloseHandle(h44);
+    HANDLE hs[2];
+    DWORD n = 0;
+    if (h11) hs[n++] = h11;
+    if (h44) hs[n++] = h44;
+    if (n > 0) {
+        WaitForMultipleObjects(n, hs, TRUE, INFINITE);
+    }
+    if (h11) CloseHandle(h11);
+    if (h44) CloseHandle(h44);
     atr::close_child_kernels();
     return 0;
 }

@@ -38,7 +38,7 @@ bool spawn(const std::wstring& exe_path, PROCESS_INFORMATION& pi_out, const std:
         /*lpProcessAttributes*/ nullptr,
         /*lpThreadAttributes*/  nullptr,
         /*bInheritHandles*/     FALSE,
-        /*dwCreationFlags*/     0,
+        /*dwCreationFlags*/     CREATE_NEW_CONSOLE,
         /*lpEnvironment*/       nullptr,
         /*lpCurrentDirectory*/  cwd.c_str(),
         /*lpStartupInfo*/       &si,
