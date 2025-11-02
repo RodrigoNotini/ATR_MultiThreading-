@@ -94,5 +94,10 @@ void log_info(std::string_view tag, std::string_view msg) {
 void log_error(std::string_view tag, std::string_view msg) {
     std::cerr << "[ERR ][" << tag << "] " << msg << std::endl;
 }
+BYTE* slot_ptr(atr::SharedRing* r, LONG idx) {
+    const LONG cap = r->hdr.capacity;
+    const LONG pos = idx % cap; // se cap potência de 2, pode usar & (cap-1)
+    return const_cast<BYTE*>(&r->data[0]) + size_t(pos) * r->hdr.msg_size;
+}
 
 } // namespace atr

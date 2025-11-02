@@ -16,11 +16,7 @@
 // Empilha em L1; retorna false se QUIT foi sinalizado (não empilhou)
 // Agora respeita on/off (evtRun) durante toda a execução.
 
-static BYTE* slot_ptr(atr::SharedRing* r, LONG idx) {
-    const LONG cap = r->hdr.capacity;
-    const LONG pos = idx % cap; // se cap potência de 2, pode usar & (cap-1)
-    return const_cast<BYTE*>(&r->data[0]) + size_t(pos) * r->hdr.msg_size;
-}
+
 
 static bool push_L1_blocking(const std::string& s, const char* produtor_tag,HANDLE evtRun) {
     for (;;) {
@@ -68,7 +64,7 @@ static bool push_L1_blocking(const std::string& s, const char* produtor_tag,HAND
 
         // salve o head atual para usar no log e no slot_ptr
         const LONG h = atr::g_B1->hdr.head;
-        BYTE* dst = slot_ptr(atr::g_B1, h);
+        BYTE* dst = atr::slot_ptr(atr::g_B1, h);
 
         // zera e copia até MSG_SZ-1, garante '\0'
         const size_t cap = size_t(atr::g_B1->hdr.msg_size);

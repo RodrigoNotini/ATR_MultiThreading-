@@ -5,6 +5,8 @@
 #include <chrono>
 #include <random>
 #include <mutex>
+#include <wtypes.h>
+#include "shared_layout.hpp"
 
 namespace atr {
 
@@ -22,6 +24,7 @@ private:
     std::mutex mtx_;
 };
 
+
 // Time helpers
 std::string now_hhmmss();      // HH:MM:SS
 std::string now_hhmmss_ms();   // HH:MM:SS:ms
@@ -34,5 +37,7 @@ std::string format_fixed(double value, int width, int precision);
 void log_warn(std::string_view tag, std::string_view msg);
 void log_info(std::string_view tag, std::string_view msg);
 void log_error(std::string_view tag, std::string_view msg);
+BYTE* slot_ptr(SharedRing* r, LONG idx);
 
 } // namespace atr
+

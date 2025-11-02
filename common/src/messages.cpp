@@ -1,4 +1,4 @@
-
+#define NOMINMAX
 #include "messages.hpp"
 #include "utils.hpp"
 #include <sstream>
