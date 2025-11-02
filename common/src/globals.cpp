@@ -48,7 +48,7 @@ namespace atr {
             CloseHandle(g_hMapB1); g_hMapB1 = nullptr;
             ExitProcess(1);
         }
-
+		// Se não existia antes, inicializa o layout
         if (created_new) {
             ZeroMemory(g_B1, total);
             g_B1->hdr.capacity = B1_CAP;

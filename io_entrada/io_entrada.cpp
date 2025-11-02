@@ -30,7 +30,7 @@ static bool push_L1_blocking(const std::string& s, const char* produtor_tag,HAND
 
         HANDLE hs[2] = { atr::g_evtQuitAll, atr::g_semSpaces_L1 };
 
-        // Tenta non-blocking primeiro 
+        // Tenta non-blocking primeiro, espera 0 não fica bloqueado
         DWORD now = WaitForSingleObject(atr::g_semSpaces_L1, 0);
         if (now == WAIT_TIMEOUT) {
             atr::log_warn(produtor_tag, "Lista L1 CHEIA — produtor vai bloquear até abrir vaga.");
