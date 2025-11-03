@@ -38,6 +38,7 @@ option(ATR_USE_WIN32 "Build with Win32 definitions" ON)
 
 # Subprojetos
 add_subdirectory(common)
+add_subdirectory(analise)
 add_subdirectory(launcher)
 add_subdirectory(teclado)
 add_subdirectory(io_entrada)

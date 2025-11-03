@@ -1,25 +1,22 @@
 
-# ATR — Fase A (Skeleton)
+# ATR — Fase A
 
 ## Como compilar (CMake)
-```bash
-cmake -S . -B build
-cmake --build build --config Release
+
+```
+No diretorio de ATR_FaseA_.\build.bat
+cd .\out\build\bin\Release para acessar o diretório com os arquivos .exe
 ```
 
-No Visual Studio 2022: **File > Open > Folder...** (selecione esta pasta). O VS detecta o CMake e cria targets.
-Alvos: `launcher`, `teclado`, `io_entrada`, `captura`, `exibicao`.
 
-## O que tem pronto
-- Biblioteca `atr_common` com:
-  - `utils.hpp/.cpp`: horário, random, padding, log.
-  - `messages.hpp/.cpp`: estruturas Msg11/Msg44 e serialização ASCII no formato especificado.
-- Cinco executáveis stub (cada um loga sua função).
-- Demostração em `io_entrada` imprimindo 1 Msg11 e 1 Msg44.
+## Como executar
+```
+Executar arquivo criado ./launcher.exe, localizado na pasta Release que foi criada pelo CMake, que criará os processos filhos
+e executará corretamente
+```
+
 
 ## Próximos passos (Fase B em diante)
-- BufferCircular<T> com semáforos + mutex.
-- Eventos Win32 nomeados para toggles/quit.
-- Produtores reais com temporização (Sleep provisório na Etapa 1).
-- Captura/demux e IPC (pipes/mailslots).
-- Projetores formatados.
+- BufferCircular, Lista 2,<T> com semáforos + mutex.
+- Implementação de IPCS.
+- Formatação correta para o resto do projeto.

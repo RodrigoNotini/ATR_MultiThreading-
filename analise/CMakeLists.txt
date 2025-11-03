@@ -1,0 +1,5 @@
+add_executable(analise analise.cpp )
+target_link_libraries(analise PRIVATE atr_common)
+if (WIN32 AND ATR_USE_WIN32)
+    target_compile_definitions(analise PRIVATE ATR_WIN32)
+endif()

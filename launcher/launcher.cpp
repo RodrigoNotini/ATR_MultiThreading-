@@ -1,54 +1,56 @@
 // launcher.cpp — Etapa 1 (ATR)
 // Compilar com MSVC (VS 2022). Lança: io_entrada, captura, exibicao, teclado (+ analise opcional).
+
 #include <windows.h>
 #include "globals.hpp"
 #include <iostream>
 #include <string>
 #include <vector>
 
-// Retorna a pasta onde está o launcher.exe (sem a barra final)
+// Retorna o diretório onde está o launcher.exe (sem a barra final)
 std::wstring exe_dir() {
     wchar_t buf[MAX_PATH];
-    DWORD n = GetModuleFileNameW(nullptr, buf, MAX_PATH);
+    DWORD n = GetModuleFileNameW(nullptr, buf, MAX_PATH); // obtém caminho completo do executável
     std::wstring full(buf, n);
-    size_t p = full.find_last_of(L"\\/");
-    return (p == std::wstring::npos) ? L"." : full.substr(0, p);
+    size_t p = full.find_last_of(L"\\/"); // encontra última barra
+    return (p == std::wstring::npos) ? L"." : full.substr(0, p); // retorna diretório
 }
 
+// Junta dois caminhos, garantindo uma única barra entre eles
 std::wstring join(const std::wstring& a, const std::wstring& b) {
-	if (a.empty()) return b; // se a for vazio, retorne b, diretorio absoluto
-	if (!a.empty() && (a.back() == L'\\' || a.back() == L'/')) return a + b; // se a terminar com barra, não adicione outra e concatene b
-	return a + L"\\" + b; // caso normal, adicione barra entre a e b
+    if (a.empty()) return b; // se a for vazio, retorna b (caminho absoluto)
+    if (!a.empty() && (a.back() == L'\\' || a.back() == L'/')) return a + b; // evita barra duplicada
+    return a + L"\\" + b; // adiciona barra normal entre a e b
 }
 
-// Cria um processo com CREATE_NEW_CONSOLE e retorna PROCESS_INFORMATION (handles precisam ser fechados depois)
+// Cria um processo filho com CREATE_NEW_CONSOLE e retorna PROCESS_INFORMATION (handles devem ser fechados depois)
 bool spawn(const std::wstring& exe_path, PROCESS_INFORMATION& pi_out, const std::wstring& args = L"") {
     STARTUPINFOW si{};
     si.cb = sizeof(si);
 
-    // Monta a command line (CreateProcess pode modificar o buffer; use algo mutável)
+    // Monta a linha de comando (CreateProcess pode modificar o buffer)
     std::wstring cmd = L"\"" + exe_path + L"\"";
     if (!args.empty()) cmd += L" " + args;
 
-    // Use diretório do próprio exe como CWD do filho (facilita acesso a arquivos relativos)
+    // Define diretório de trabalho como o mesmo do executável principal
     std::wstring cwd = exe_dir();
     BOOL ok = CreateProcessW(
-        /*lpApplicationName*/ nullptr,     // deixe null e use a command line acima
-        /*lpCommandLine*/     cmd.data(),  // buffer mutável
-        /*lpProcessAttributes*/ nullptr,
-        /*lpThreadAttributes*/  nullptr,
-        /*bInheritHandles*/     FALSE,
-        /*dwCreationFlags*/     CREATE_NEW_CONSOLE,
-        /*lpEnvironment*/       nullptr,
-        /*lpCurrentDirectory*/  cwd.c_str(),
-        /*lpStartupInfo*/       &si,
-        /*lpProcessInformation*/&pi_out
+        nullptr,               // nome do executável (usando command line)
+        cmd.data(),            // linha de comando mutável
+        nullptr, nullptr,      // atributos de segurança padrão
+        FALSE,                 // não herda handles
+        CREATE_NEW_CONSOLE,    // cria nova janela de console
+        nullptr,               // ambiente herdado
+        cwd.c_str(),           // diretório atual
+        &si, &pi_out           // estruturas de inicialização e saída
     );
+
     if (!ok) {
         DWORD e = GetLastError();
         std::wcerr << L"[launcher] Falha ao criar: " << exe_path << L" (erro " << e << L")\n";
         return false;
     }
+
     std::wcout << L"[launcher] OK: " << exe_path << L" (PID " << pi_out.dwProcessId << L")\n";
     return true;
 }
@@ -56,21 +58,22 @@ bool spawn(const std::wstring& exe_path, PROCESS_INFORMATION& pi_out, const std:
 int wmain() {
     std::wcout << L"[launcher] Iniciando processos...\n";
 
-    atr::init_globals();
+    atr::init_globals(); // inicializa objetos kernel globais (eventos, semáforos etc.)
     const std::wstring base = exe_dir();
-    // Se os .exe estiverem no MESMO diretório do launcher (padrão mais comum):
-    // Vetor com os nomes dos programas a iniciar
+
+    // Nomes dos executáveis a serem lançados
     const std::vector<std::wstring> programas = {
         L"io_entrada.exe",
         L"captura.exe",
         L"exibicao.exe",
         L"teclado.exe",
-        // L"analise.exe", // descomente se já existir
+        L"analise.exe",
     };
 
     std::vector<PROCESS_INFORMATION> children;
-    children.reserve(programas.size());
-	// Inicia cada programa com spawn() e armazena o PROCESS_INFORMATION em children
+    children.reserve(programas.size()); // reserva espaço para os processos filhos
+
+    // Cria cada processo com spawn() e armazena seus dados
     for (const auto& name : programas) {
         PROCESS_INFORMATION pi{};
         const std::wstring path = join(base, name);
@@ -88,19 +91,18 @@ int wmain() {
     }
 
     std::wcout << L"[launcher] Todos iniciados. Aguardando finalização dos filhos...\n";
-    // Aguarda todos os processos finalizarem (cada módulo deve encerrar pelo seu próprio fluxo)
+
+    // Coleta os handles dos processos filhos
     std::vector<HANDLE> hs;
-	// Reserva espaço para os handles
     hs.reserve(children.size());
-	// Guarda os handles de processo (hProcess) em hs
     for (auto& pi : children) hs.push_back(pi.hProcess);
 
-    // WaitForMultipleObjects aceita no máx. 64 handles — estamos bem abaixo disso
+    // Espera até que todos os processos finalizem
     WaitForMultipleObjects(static_cast<DWORD>(hs.size()), hs.data(), TRUE, INFINITE);
 
-    atr::cleanup_globals();
+    atr::cleanup_globals(); // limpa e fecha objetos kernel globais
 
-    // Limpeza de handles dos processos filhos
+    // Fecha os handles dos processos e threads filhos
     for (auto& pi : children) {
         CloseHandle(pi.hThread);
         CloseHandle(pi.hProcess);

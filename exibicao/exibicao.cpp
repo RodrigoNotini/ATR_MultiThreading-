@@ -1,60 +1,37 @@
-#include "utils.hpp"
+﻿#include "utils.hpp"
 #include "globals.hpp"
 #include "shared_layout.hpp"
 #include <windows.h>
 #include <iostream>
 
+// Thread responsável por exibir os dados na tela
 DWORD WINAPI thr_exibicao(LPVOID) {
+    int n = 0; // contador de exibições
     for (;;) {
-        // Sai se QUIT
+        // Sai se o evento global de saída (QUIT) estiver sinalizado
         if (WaitForSingleObject(atr::g_evtQuitAll, 0) == WAIT_OBJECT_0) return 0;
 
-        // Bloqueia at� RUN ou QUIT
+        // Aguarda até que RUN ou QUIT sejam sinalizados
         HANDLE hs[] = { atr::g_evtQuitAll, atr::g_evtRunExibicao };
         DWORD wr = WaitForMultipleObjects(2, hs, FALSE, INFINITE);
         if (wr == WAIT_OBJECT_0) return 0;          // QUIT
-        // wr == WAIT_OBJECT_0+1 -> RUN est� sinalizado (manual-reset)
+        // wr == WAIT_OBJECT_0 + 1 → RUN foi sinalizado (manual-reset)
 
-        // FAZ O TRABALHO ENQUANTO RUN CONTINUAR SINALIZADO
+        // Executa enquanto RUN permanecer sinalizado
         if (WaitForSingleObject(atr::g_evtRunExibicao, 0) == WAIT_OBJECT_0) {
-            std::cout << "Exibindo dados na tela...\n";
-            Sleep(200); // evita loop 100% CPU
-        }
-    }
-}
-
-DWORD WINAPI thr_analise_granulometria(LPVOID) {
-    for (;;) {
-        if (WaitForSingleObject(atr::g_evtQuitAll, 0) == WAIT_OBJECT_0) return 0;
-
-        HANDLE hs[] = { atr::g_evtQuitAll, atr::g_evtRunAnalise };
-        DWORD wr = WaitForMultipleObjects(2, hs, FALSE, INFINITE);
-        if (wr == WAIT_OBJECT_0) return 0;
-
-        if (WaitForSingleObject(atr::g_evtRunAnalise, 0) == WAIT_OBJECT_0) {
-            std::cout << "Analise de dados\n";
-            Sleep(200);
+            ++n; // incrementa contador
+            std::cout << "Exibindo dados na tela...\n"
+                << "Numero " << n << "\n";
+            Sleep(200); // pequena pausa para evitar uso excessivo da CPU
         }
     }
 }
 
 int main() {
-    atr::open_child_kernels();  // cria/abre eventos: g_evtQuitAll (manual-reset), g_evtRunMedicao (manual-reset)
-    // opcional: come�ar em RUN
-    SetEvent(atr::g_evtRunMedicao);
-
-    HANDLE h1 = CreateThread(nullptr, 0, thr_exibicao, nullptr, 0, nullptr);
-    HANDLE h2 = CreateThread(nullptr, 0, thr_analise_granulometria, nullptr, 0, nullptr);
-
-    // >>> mantenha o processo vivo at� QUIT
-    WaitForSingleObject(atr::g_evtQuitAll, INFINITE);
-
-    // depois de QUIT, espere threads terminarem e limpe
-    HANDLE hs[] = { h1, h2 };
-    WaitForMultipleObjects(2, hs, TRUE, INFINITE);
-    if (h1) CloseHandle(h1);
-    if (h2) CloseHandle(h2);
-
-    atr::close_child_kernels();
+    atr::open_child_kernels();  // abre/cria objetos kernel compartilhados (eventos globais)
+    HANDLE h1 = CreateThread(nullptr, 0, thr_exibicao, nullptr, 0, nullptr); // cria thread de exibição
+    if (h1) WaitForSingleObject(h1, INFINITE); // espera término da thread
+    if (h1) CloseHandle(h1); // libera handle da thread
+    atr::close_child_kernels(); // fecha objetos kernel
     return 0;
 }

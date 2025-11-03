@@ -1,57 +1,55 @@
-// consumidor.cpp
+Ôªø
 #include "utils.hpp"
 #include "globals.hpp"
 #include "shared_layout.hpp"
 #include <iostream>
-#include <cstring>   // strnlen/memcpy (MSVC tem strnlen)
+#include <cstring>   
 
+// Consome 1 item de L1 respeitando RUN/PAUSE e QUIT
 static bool pull_L1_blocking(const char* consumidor_tag, HANDLE evtRun) {
     for (;;) {
-        // 0) Se estiver PAUSADO, espera RUN ou QUIT
+        // 0) Se PAUSADO: espera RUN ou QUIT
         if (WaitForSingleObject(evtRun, 0) != WAIT_OBJECT_0) {
             HANDLE hs_run[2] = { atr::g_evtQuitAll, evtRun };
             DWORD wr = WaitForMultipleObjects(2, hs_run, FALSE, INFINITE);
             if (wr == WAIT_OBJECT_0) return false; // QUIT
-            // RUN sinalizado -> continua
+            // RUN ‚Üí prossegue
         }
 
         HANDLE hs[2] = { atr::g_evtQuitAll, atr::g_semItems_L1 };
 
-        //Tenta non-blocking pegar item, tempo de espera 0 n„o fica bloqueado
+        // 1) Tenta pegar item sem bloquear
         DWORD now = WaitForSingleObject(atr::g_semItems_L1, 0);
         if (now == WAIT_TIMEOUT) {
-			// Normalmente lista est· vazia aqui, pois a captura n„o È periÛdica enquanto a produÁ„o È.
-            // atr::log_warn(consumidor_tag, "Lista L1 VAZIA ó bloqueando atÈ chegar item.");
-            // Espera por ITEM ou QUIT
+            // Lista vazia: espera ITEM ou QUIT
             DWORD r = WaitForMultipleObjects(2, hs, FALSE, INFINITE);
             if (r == WAIT_OBJECT_0) return false;         // QUIT
             if (r != WAIT_OBJECT_0 + 1) {
                 atr::log_error(consumidor_tag, "Falha ao aguardar item/quit (WFMO).");
                 return false;
             }
-            // r == WAIT_OBJECT_0+1 -> acabamos de CONSUMIR um item do sem·foro
+            // r == WAIT_OBJECT_0+1 ‚Üí item consumido do sem√°foro
         }
         else if (now != WAIT_OBJECT_0) {
             atr::log_error(consumidor_tag, "Falha ao aguardar item (WFSO 0ms).");
             return false;
         }
-        // Chegamos aqui COM UM ITEM garantido (sem·foro j· decrementado)
+        // Chegou aqui COM 1 ITEM garantido
 
-        //Se PAUSOU exatamente agora, devolve o item e espera RUN/QUIT
+        // 2) Se PAUSOU exatamente agora, devolve item e espera RUN/QUIT
         if (WaitForSingleObject(evtRun, 0) != WAIT_OBJECT_0) {
-            ReleaseSemaphore(atr::g_semItems_L1, 1, nullptr);  // devolve o item
+            ReleaseSemaphore(atr::g_semItems_L1, 1, nullptr);  // devolve item
             HANDLE hs_run[2] = { atr::g_evtQuitAll, evtRun };
             DWORD wr2 = WaitForMultipleObjects(2, hs_run, FALSE, INFINITE);
             if (wr2 == WAIT_OBJECT_0) return false;           // QUIT durante pausa
-            continue;                                          // RUN -> tenta de novo
+            continue;                                          // RUN ‚Üí tenta de novo
         }
 
-        //Entra na regi„o crÌtica para ler e avanÁar o tail
+        // 3) Entra na regi√£o cr√≠tica: leitura e avan√ßo do tail
         DWORD mw = WaitForSingleObject(atr::mutexL1, INFINITE);
         if (mw != WAIT_OBJECT_0) {
             atr::log_error(consumidor_tag, "Falha ao adquirir mutexL1.");
-            // devolve o item ao sem·foro para n„o perder
-            ReleaseSemaphore(atr::g_semItems_L1, 1, nullptr);
+            ReleaseSemaphore(atr::g_semItems_L1, 1, nullptr);  // devolve item
             return false;
         }
 
@@ -59,73 +57,78 @@ static bool pull_L1_blocking(const char* consumidor_tag, HANDLE evtRun) {
         BYTE* src = atr::slot_ptr(atr::g_B1, t);
         const size_t cap = size_t(atr::g_B1->hdr.msg_size);
 
-        // Como o produtor zera o slot e copia no m·x. cap-1, podemos confiar no '\0'.
+        // Leitura segura (produtor garante '\0' at√© cap-1)
         const char* csrc = reinterpret_cast<const char*>(src);
         size_t n = 0;
         n = ::strnlen(csrc, cap - 1);
         std::string msg(csrc, n);
         const LONG idx_fisico = t % atr::g_B1->hdr.capacity;
-        // avanÁa o tail lÛgico
+
+        // Avan√ßa tail l√≥gico e sai da RC
         atr::g_B1->hdr.tail = t + 1;
         ReleaseMutex(atr::mutexL1);
 
-        // 4) Libera uma VAGA no sem·foro de espaÁos
+        // 4) Libera 1 vaga no sem√°foro de espa√ßos
         ReleaseSemaphore(atr::g_semSpaces_L1, 1, nullptr);
 
-        // Testando se a mensagem foi consumida corretamente.
+        // Log simples do consumo
         std::cout << "[consumidor " << consumidor_tag << "] "
             << "L1 pull idx=" << t
             << " (fis=" << idx_fisico << "), bytes=" << n
             << ", msg=\"" << msg << "\"\n";
 
-        
+        // 5) Roteamento b√°sico por prefixo
         if (msg.rfind("44/", 0) == 0) {
-            // Captura 44 -> ExibiÁ„o (envio por meio de Pipe na etapa 2)
+            // MSG44 ‚Üí Exibi√ß√£o (Pipe na etapa 2)
             atr::log_info(consumidor_tag, "roteado: MSG44 para exibicao");
             // TODO: enviar para exibicao
         }
         else if (msg.rfind("11/", 0) == 0) {
+            // MSG11 ‚Üí L2 (fila de an√°lise)
             atr::log_info(consumidor_tag, "roteado: MSG11 para L2");
-            // TODO: push em L2 (sem·foros/mutex de L2)
+            // TODO: push em L2 (sem√°foros/mutex de L2)
         }
         else {
             atr::log_warn(consumidor_tag, "Formato desconhecido (nem 11/ nem 44/)");
         }
 
-        // Continua consumindo atÈ QUIT
+        // Continua consumindo at√© QUIT
     }
 }
 
+// Thread que consome mensagens de L1 (captura)
 DWORD WINAPI thr_msg_capture(LPVOID) {
     std::cout << "Thread captura iniciada com sucesso!" << std::endl;
 
     for (;;) {
-        // Sai imediatamente se QUIT j· estiver sinalizado
+        // Sai se QUIT
         if (WaitForSingleObject(atr::g_evtQuitAll, 0) == WAIT_OBJECT_0) break;
 
-        // Se estiver pausado, espera RUN ou QUIT
+        // Pausa: espera RUN ou QUIT
         if (WaitForSingleObject(atr::g_evtRunCaptura, 0) != WAIT_OBJECT_0) {
             HANDLE hs[2] = { atr::g_evtQuitAll, atr::g_evtRunCaptura };
             DWORD r = WaitForMultipleObjects(2, hs, FALSE, INFINITE);
             if (r == WAIT_OBJECT_0) break; // QUIT
         }
 
-        // Tenta consumir 1 item (a funÁ„o j· respeita PAUSE/QUIT internamente)
+        // Consome 1 item (fun√ß√£o j√° trata PAUSE/QUIT)
         if (!pull_L1_blocking("captura", atr::g_evtRunCaptura)) break;
     }
 
     atr::log_info("captura", "Encerrando thread de captura.");
     return 0;
 }
+
 int main() {
-	atr::open_child_kernels();
-	HANDLE hCapture = CreateThread(nullptr, 0, thr_msg_capture, nullptr, 0, nullptr);
+    atr::open_child_kernels(); // abre/cria objetos kernel compartilhados
+
+    HANDLE hCapture = CreateThread(nullptr, 0, thr_msg_capture, nullptr, 0, nullptr);
     DWORD n = 0;
     if (hCapture) n++;
     if (n > 0) {
-        WaitForSingleObject(hCapture, INFINITE);
+        WaitForSingleObject(hCapture, INFINITE); // aguarda fim da thread
     }
-    if (hCapture) CloseHandle(hCapture);
-    atr::close_child_kernels();
+    if (hCapture) CloseHandle(hCapture); // fecha handle
+    atr::close_child_kernels(); // fecha objetos kernel
     return 0;
 }
