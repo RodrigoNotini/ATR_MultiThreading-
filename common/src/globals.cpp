@@ -20,18 +20,22 @@ namespace atr {
     HANDLE g_evtClearExibicao = nullptr;
     HANDLE g_evtQuitAll = nullptr;
 
-    HANDLE      g_hMapB1 = nullptr;
+    HANDLE  g_hMapB1 = nullptr;
     SharedRing* g_B1 = nullptr;
+
+	HANDLE g_hMapB2 = nullptr;
+	SharedRing* g_B2 = nullptr;
 
     // ===== Launcher =====
     void init_globals() {
+		// Tamanho total do mapeamento L1
         const size_t total = ring_total_size(B1_CAP, MSG_SZ);
-
+		// Criando mapeamento L1, do tamanho do buffer circular 1
         g_hMapB1 = CreateFileMappingW(
             INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE,
             DWORD((uint64_t)total >> 32), DWORD(total & 0xFFFFFFFF),
             ATR_B1_NAME);
-
+		// Verifica erros
         if (!g_hMapB1) {
             std::cerr << "[globals] ERRO CreateFileMappingW(B1): " << GetLastError() << "\n";
             ExitProcess(1);
@@ -39,10 +43,11 @@ namespace atr {
 
         const DWORD lastErr = GetLastError();
         const bool created_new = (lastErr != ERROR_ALREADY_EXISTS);
-
+		// Cria visao do mapeamento 1, retornando ponteiro do tipo SharedRing
         g_B1 = reinterpret_cast<SharedRing*>(
             MapViewOfFile(g_hMapB1, FILE_MAP_ALL_ACCESS, 0, 0, 0)
             );
+		// Checagem de erro na atribuição de valor à g_B1
         if (!g_B1) {
             std::cerr << "[globals] ERRO MapViewOfFile(B1): " << GetLastError() << "\n";
             CloseHandle(g_hMapB1); g_hMapB1 = nullptr;
@@ -55,6 +60,39 @@ namespace atr {
             g_B1->hdr.msg_size = MSG_SZ;
             g_B1->hdr.head = 0;
             g_B1->hdr.tail = 0;
+        }
+        // Criando mapeamento L2
+        // Tamanho diferente devido a capacidade e tamanho de mensagem
+		const size_t total_2 = ring_total_size(B2_CAP, MSG_SZ_11);
+		// Criando mapeamento L2, do tamanho do buffer circular 2
+        g_hMapB2 = CreateFileMappingW(
+            INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE,
+            DWORD((uint64_t)total_2 >> 32),DWORD(total_2 & 0xFFFFFFFF),
+			ATR_B2_NAME);
+        // Verifica erros
+        if (!g_hMapB2) {
+            std::cerr << "[globals] ERRO CreateFileMappingW(B2): " << GetLastError() << "\n";
+            ExitProcess(1);
+        }
+        const DWORD lastErr_2 = GetLastError();
+        const bool created_new_2 = (lastErr_2 != ERROR_ALREADY_EXISTS);
+		// Cria visao do mapeamento 2, retornando ponteiro do tipo SharedRing
+        g_B2 = reinterpret_cast<SharedRing*>(
+            MapViewOfFile(g_hMapB2, FILE_MAP_ALL_ACCESS, 0, 0, 0)
+            );
+		// Checagem de erro na atribuição de valor à g_B2
+        if (!g_B2) {
+            std::cerr << "[globals] ERRO MapViewOfFile(B2): " << GetLastError() << "\n";
+            CloseHandle(g_hMapB2); g_hMapB2 = nullptr;
+            ExitProcess(1);
+        }
+		// Se mapeamento nao existia, incializa o layout
+        if (created_new_2) {
+            ZeroMemory(g_B2, total_2);
+            g_B2->hdr.capacity = B2_CAP;
+            g_B2->hdr.msg_size = MSG_SZ_11;
+            g_B2->hdr.head = 0;
+            g_B2->hdr.tail = 0;
         }
 
         // Sync L1
@@ -114,6 +152,9 @@ namespace atr {
         // Desmapear e fechar mapping (ordem!)
         if (g_B1) { UnmapViewOfFile(g_B1); g_B1 = nullptr; }
         if (g_hMapB1) { CloseHandle(g_hMapB1); g_hMapB1 = nullptr; }
+		// Desmapear e fechar mapping L2
+		if (g_B2) { UnmapViewOfFile(g_B2); g_B2 = nullptr; }
+		if (g_hMapB2) { CloseHandle(g_hMapB2); g_hMapB2 = nullptr; }
 
         std::cout << "[globals] Limpo\n";
     }
@@ -126,7 +167,7 @@ namespace atr {
             std::cerr << "[globals childs] ERRO OpenFileMapping(B1): " << GetLastError() << "\n";
             ExitProcess(1);
         }
-
+        //Mapeamento L1
         g_B1 = reinterpret_cast<SharedRing*>(
             MapViewOfFile(g_hMapB1, FILE_MAP_ALL_ACCESS, 0, 0, 0)
             );
@@ -136,9 +177,28 @@ namespace atr {
             ExitProcess(1);
         }
 
-        // (opcional) validar layout
+        // validar layout
         if (g_B1->hdr.capacity != B1_CAP || g_B1->hdr.msg_size != MSG_SZ) {
             std::cerr << "[globals childs] ERRO: SharedRing B1 parâmetros inesperados!\n";
+            ExitProcess(1);
+        }
+		// Abrir mapping L2 e mapear a view
+		g_hMapB2 = OpenFileMappingW(FILE_MAP_ALL_ACCESS, FALSE, ATR_B2_NAME);
+        if (!g_hMapB2) {
+            std::cerr << "[globals childs] ERRO OpenFileMapping(B2): " << GetLastError() << "\n";
+            ExitProcess(1);
+        }
+        // Mapeamento L2
+        g_B2 = reinterpret_cast<SharedRing*>(
+            MapViewOfFile(g_hMapB2, FILE_MAP_ALL_ACCESS, 0, 0, 0)
+			);
+        if (!g_B2) {
+            std::cerr << "[globals childs] ERRO MapViewOfFile(B2): " << GetLastError() << "\n";
+            CloseHandle(g_hMapB2); g_hMapB2 = nullptr;
+            ExitProcess(1);
+        }
+        if (g_B2->hdr.capacity != B2_CAP || g_B2->hdr.msg_size != MSG_SZ_11) {
+            std::cerr << "[globals childs] ERRO: SharedRing B2 parâmetros inesperados!\n";
             ExitProcess(1);
         }
 
@@ -185,6 +245,9 @@ namespace atr {
         // Desmapear e fechar mapping (ordem!)
         if (g_B1) { UnmapViewOfFile(g_B1); g_B1 = nullptr; }
         if (g_hMapB1) { CloseHandle(g_hMapB1); g_hMapB1 = nullptr; }
+		// Desmapear e fechar mapping L2
+		if (g_B2) { UnmapViewOfFile(g_B2); g_B2 = nullptr; }
+		if (g_hMapB2) { CloseHandle(g_hMapB2); g_hMapB2 = nullptr; }
 
         std::cout << "[globals childs] Limpo\n";
     }

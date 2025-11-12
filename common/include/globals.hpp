@@ -6,6 +6,9 @@ namespace atr {
 	//Definindo nova Lista 1
 	extern SharedRing* g_B1; // Ponteiro para a estrutura de dados compartilhada da Lista 1
 	extern HANDLE g_hMapB1; // Handle para arquivo mapeado (shared memory) da Lista 1
+	//Definindo nova Lista 2
+	extern SharedRing* g_B2; // Ponteiro para a estrutura de dados compartilhada da Lista 2
+	extern HANDLE g_hMapB2; // Handle para arquivo mapeado (shared memory) da Lista 2
 
 	// Lista 1 (mensagens de io_entrada)
 	extern HANDLE g_semItems_L1;   // conta itens disponíveis

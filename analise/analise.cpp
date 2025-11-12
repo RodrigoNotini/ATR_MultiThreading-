@@ -3,7 +3,7 @@
 #include "shared_layout.hpp"
 #include <windows.h>
 #include <iostream>
-
+// Mensagens do tipo 11, L2 associada precisa apenas da visão do buffer 2
 // Thread responsável por realizar a análise granulométrica
 DWORD WINAPI thr_analise_granulometria(LPVOID) {
     int n = 0; // contador de análises realizadas

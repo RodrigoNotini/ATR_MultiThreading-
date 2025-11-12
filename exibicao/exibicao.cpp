@@ -3,7 +3,7 @@
 #include "shared_layout.hpp"
 #include <windows.h>
 #include <iostream>
-
+// Mensagens do tipo 44
 // Thread responsável por exibir os dados na tela
 DWORD WINAPI thr_exibicao(LPVOID) {
     int n = 0; // contador de exibições

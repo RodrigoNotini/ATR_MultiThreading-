@@ -1,11 +1,82 @@
-﻿
+﻿#define NOMINMAX
 #include "utils.hpp"
 #include "globals.hpp"
 #include "shared_layout.hpp"
 #include <iostream>
 #include <cstring>   
-
+// Captura precisa das visões do buffer 1 e 2
 // Consome 1 item de L1 respeitando RUN/PAUSE e QUIT
+static bool push_L2_blocking(const std::string& s, const char* produtor_tag, HANDLE evtRun) {
+    for (;;) {
+        // Pausado: aguarda RUN ou QUIT
+        if (WaitForSingleObject(evtRun, 0) != WAIT_OBJECT_0) {
+            HANDLE hs_run[2] = { atr::g_evtQuitAll, evtRun };
+            DWORD wr = WaitForMultipleObjects(2, hs_run, FALSE, INFINITE);
+            if (wr == WAIT_OBJECT_0) return false; // QUIT
+			//else RUN → prossegue
+        }
+
+        HANDLE hs[2] = { atr::g_evtQuitAll, atr::g_semSpaces_L2 };
+
+        // Tenta pegar vaga sem bloquear
+        DWORD now = WaitForSingleObject(atr::g_semSpaces_L2, 0);
+        if (now == WAIT_TIMEOUT) {
+            atr::log_warn(produtor_tag, "Lista L2 CHEIA — produtor vai bloquear até abrir vaga.");
+
+            // Espera por vaga ou QUIT
+            DWORD r = WaitForMultipleObjects(2, hs, FALSE, INFINITE);
+            if (r == WAIT_OBJECT_0) return false; // QUIT
+            if (r != WAIT_OBJECT_0 + 1) {
+                atr::log_error(produtor_tag, "Falha ao aguardar vaga/quit (WFMO).");
+                return false;
+            }
+			// else vaga garantida
+        }
+        else if (now != WAIT_OBJECT_0) {
+            atr::log_error(produtor_tag, "Falha ao tentar vaga em L1 (WFSO 0ms).");
+            return false;
+        }
+        // A partir daqui há vaga garantida (semáforo já decrementado)
+
+        // Se pausou exatamente agora, devolve vaga e aguarda RUN/QUIT
+        if (WaitForSingleObject(evtRun, 0) != WAIT_OBJECT_0) {
+            ReleaseSemaphore(atr::g_semSpaces_L2, 1, nullptr);
+            HANDLE hs_run[2] = { atr::g_evtQuitAll, evtRun };
+            DWORD wr2 = WaitForMultipleObjects(2, hs_run, FALSE, INFINITE);
+            if (wr2 == WAIT_OBJECT_0) return false; // QUIT
+            continue; // RUN → tenta de novo
+        }
+
+        // Entra na região crítica para escrever no buffer
+        WaitForSingleObject(atr::mutexL2, INFINITE);
+
+        const LONG h = atr::g_B2->hdr.head;               // índice lógico atual
+        BYTE* dst = atr::slot_ptr(atr::g_B2, h);          // ponteiro para slot físico
+        const size_t cap = size_t(atr::g_B2->hdr.msg_size);
+
+        // Zera o slot e copia até cap-1, garantindo '\0'
+        memset(dst, 0, cap);
+        const size_t n = std::min(s.size(), cap ? cap - 1 : 0);
+        memcpy(dst, s.data(), n);
+
+        const LONG idx_fisico = h % atr::g_B2->hdr.capacity;
+        const char* pushed = reinterpret_cast<const char*>(dst);
+
+        // Log do push (índices e bytes)
+        std::cout << "[produtor " << produtor_tag << "] "
+            << "L2 push idx=" << h
+            << " (fis=" << idx_fisico << "), bytes=" << n
+            << ", msg=\"" << std::string(pushed, n) << "\"\n";
+
+        atr::g_B2->hdr.head = h + 1;                      // avança head lógico
+        ReleaseMutex(atr::mutexL2);                       // sai da RC
+
+        ReleaseSemaphore(atr::g_semItems_L2, 1, nullptr); // sinaliza item disponível
+        return true;
+    }
+}
+
+
 static bool pull_L1_blocking(const char* consumidor_tag, HANDLE evtRun) {
     for (;;) {
         // 0) Se PAUSADO: espera RUN ou QUIT
@@ -84,6 +155,7 @@ static bool pull_L1_blocking(const char* consumidor_tag, HANDLE evtRun) {
             // TODO: enviar para exibicao
         }
         else if (msg.rfind("11/", 0) == 0) {
+			if(!push_L2_blocking(msg, consumidor_tag, atr::g_evtRunCaptura)) return false; // Se ocorreu quit durante push, sai.
             // MSG11 → L2 (fila de análise)
             atr::log_info(consumidor_tag, "roteado: MSG11 para L2");
             // TODO: push em L2 (semáforos/mutex de L2)
