@@ -28,10 +28,14 @@ namespace atr {
 	extern HANDLE g_evtRunAnalise;
 	extern HANDLE g_evtClearExibicao;
 	extern HANDLE g_evtQuitAll;
+
+	extern HANDLE hMailSlot;
 	
 
 	// Função de inicialização e limpeza
 	void init_globals();
+	void init_mailslot();
+	void write_mailslot_clear();
 	void cleanup_globals();
 	void open_child_kernels();
 	void close_child_kernels();

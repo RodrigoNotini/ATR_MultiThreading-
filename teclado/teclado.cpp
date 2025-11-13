@@ -59,9 +59,11 @@ DWORD WINAPI keyboard_reading(LPVOID) {
             atr::log_info("exibicao", "on-off"); break;
         case 'a': toggle(atr::g_evtRunAnalise, "Exibicao");
             atr::log_info("granulometria", "on-off"); break;
-        case 'c': /* opção: enviar 'clear' p/ exibicao na Parte B */
-            SetEvent(atr::g_evtClearExibicao);
-            atr::log_info("exibicao", "clear"); break;
+        case 'c': // envia clear por meio de Mailslot
+			atr::log_info("teclado", "clear_exibicao");
+            // atr::write_mailslot_clear();
+			break;
+            
         default:  std::cout << "Caso geral" << (char)ch << "\n"; break; // tecla não mapeada
         }
     }

@@ -17,7 +17,6 @@ namespace atr {
     HANDLE g_evtRunCaptura = nullptr;
     HANDLE g_evtRunExibicao = nullptr;
     HANDLE g_evtRunAnalise = nullptr;
-    HANDLE g_evtClearExibicao = nullptr;
     HANDLE g_evtQuitAll = nullptr;
 
     HANDLE  g_hMapB1 = nullptr;
@@ -25,6 +24,9 @@ namespace atr {
 
 	HANDLE g_hMapB2 = nullptr;
 	SharedRing* g_B2 = nullptr;
+
+    const wchar_t* MailSlotPath = L"\\\\.\\mailslot\\TecladoMailSlot";
+    HANDLE hMailSlot = nullptr;
 
     // ===== Launcher =====
     void init_globals() {
@@ -121,17 +123,68 @@ namespace atr {
         g_evtRunCaptura = CreateEvent(nullptr, TRUE, TRUE, L"Local\\ATR.EVT.RUN.CAPTURA");
         g_evtRunExibicao = CreateEvent(nullptr, TRUE, TRUE, L"Local\\ATR.EVT.RUN.EXIBICAO");
         g_evtRunAnalise = CreateEvent(nullptr, TRUE, TRUE, L"Local\\ATR.EVT.RUN.ANALISE");
-        g_evtClearExibicao = CreateEvent(nullptr, FALSE, FALSE, L"Local\\ATR.EVT.RUN.CLEAR_EXIBICAO");
         g_evtQuitAll = CreateEvent(nullptr, TRUE, FALSE, L"Local\\ATR.EVT.QUITALL");
 
+        //MailSlot que enviará mensagem de clear para exibição
+
+        // MailSlot que será criado para enviar 
+
         if (!g_evtRunMedicao || !g_evtRunCLP || !g_evtRunCaptura || !g_evtRunExibicao ||
-            !g_evtRunAnalise || !g_evtClearExibicao || !g_evtQuitAll) {
+            !g_evtRunAnalise ||!g_evtQuitAll) {
             std::cerr << "[globals] ERRO criando eventos: " << GetLastError() << "\n";
             ExitProcess(1);
         }
 
         std::cout << "[globals] Inicializado\n";
     }
+    
+	void init_mailslot() { // Cria o mailslot para envio de clear, usado apenas no exibicao que sera o "servidor"
+
+    hMailSlot = CreateMailslotW(
+        MailSlotPath,
+        0,
+        MAILSLOT_WAIT_FOREVER,
+        nullptr
+	);
+    if (hMailSlot == INVALID_HANDLE_VALUE) {
+        std::cerr << "[globals] ERRO CreateMailslotW: " << GetLastError() << "\n";
+        ExitProcess(1);
+	}
+	std::cout << "[globals] Mailslot criado com sucesso\n";
+
+	}
+
+    void write_mailslot_clear() { // Envia clear por meio de mailslot
+        const char* clear_msg = "CLEAR";
+        DWORD bytesWritten = 0;
+        HANDLE hFile = CreateFileW( // Abre o mailslot e obtem HANDLE hfile para processo diferente, no caso será teclado
+            MailSlotPath,
+            GENERIC_WRITE,
+            FILE_SHARE_READ,
+            nullptr,
+            OPEN_EXISTING,
+            FILE_ATTRIBUTE_NORMAL,
+            nullptr
+		);
+        if (hFile == INVALID_HANDLE_VALUE) {
+            std::cerr << "[globals] ERRO CreateFileW para mailslot: " << GetLastError() << "\n";
+            return;
+        }
+		BOOL result = WriteFile( // Escreve a mensagem CLEAR no mailslot
+            hFile,
+            clear_msg,
+            DWORD(strlen(clear_msg)),
+            &bytesWritten,
+            nullptr
+        );
+        if (!result) {
+            std::cerr << "[globals] ERRO WriteFile para mailslot: " << GetLastError() << "\n";
+        }
+        else {
+            std::cout << "[globals] Mensagem CLEAR enviada ao mailslot (" << bytesWritten << " bytes)\n";
+        }
+	}
+
 
     void cleanup_globals() {
         // Fechar sync/eventos
@@ -146,7 +199,6 @@ namespace atr {
         if (g_evtRunExibicao) { CloseHandle(g_evtRunExibicao); g_evtRunExibicao = nullptr; }
         if (g_evtRunCaptura) { CloseHandle(g_evtRunCaptura); g_evtRunCaptura = nullptr; }
         if (g_evtRunAnalise) { CloseHandle(g_evtRunAnalise); g_evtRunAnalise = nullptr; }
-        if (g_evtClearExibicao) { CloseHandle(g_evtClearExibicao); g_evtClearExibicao = nullptr; }
         if (g_evtQuitAll) { CloseHandle(g_evtQuitAll);    g_evtQuitAll = nullptr; }
 
         // Desmapear e fechar mapping (ordem!)
@@ -215,12 +267,11 @@ namespace atr {
         g_evtRunCaptura = OpenEvent(EVENT_ALL_ACCESS, FALSE, L"Local\\ATR.EVT.RUN.CAPTURA");
         g_evtRunExibicao = OpenEvent(EVENT_ALL_ACCESS, FALSE, L"Local\\ATR.EVT.RUN.EXIBICAO");
         g_evtRunAnalise = OpenEvent(EVENT_ALL_ACCESS, FALSE, L"Local\\ATR.EVT.RUN.ANALISE");
-        g_evtClearExibicao = OpenEvent(EVENT_ALL_ACCESS, FALSE, L"Local\\ATR.EVT.RUN.CLEAR_EXIBICAO");
         g_evtQuitAll = OpenEvent(EVENT_ALL_ACCESS, FALSE, L"Local\\ATR.EVT.QUITALL");
 
         if (!g_semItems_L1 || !g_semSpaces_L1 || !g_semItems_L2 || !g_semSpaces_L2 ||
             !mutexL1 || !mutexL2 || !g_evtRunMedicao || !g_evtRunCLP || !g_evtRunCaptura ||
-            !g_evtRunExibicao || !g_evtRunAnalise || !g_evtClearExibicao || !g_evtQuitAll) {
+            !g_evtRunExibicao || !g_evtRunAnalise || !g_evtQuitAll) {
             std::cerr << "[globals childs] ERRO abrindo objetos kernel: " << GetLastError() << "\n";
             ExitProcess(1);
         }
@@ -239,7 +290,6 @@ namespace atr {
         if (g_evtRunExibicao) { CloseHandle(g_evtRunExibicao); g_evtRunExibicao = nullptr; }
         if (g_evtRunCaptura) { CloseHandle(g_evtRunCaptura); g_evtRunCaptura = nullptr; }
         if (g_evtRunAnalise) { CloseHandle(g_evtRunAnalise); g_evtRunAnalise = nullptr; }
-        if (g_evtClearExibicao) { CloseHandle(g_evtClearExibicao); g_evtClearExibicao = nullptr; }
         if (g_evtQuitAll) { CloseHandle(g_evtQuitAll);    g_evtQuitAll = nullptr; }
 
         // Desmapear e fechar mapping (ordem!)

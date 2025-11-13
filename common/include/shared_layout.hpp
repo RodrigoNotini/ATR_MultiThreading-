@@ -6,11 +6,11 @@
 namespace atr {
 #define ATR_B1_NAME L"Local\\ATR.MAP.B1"   // nome do mapeamento de L1
     constexpr LONG B1_CAP = 200;               // capacidade da L1 
-    constexpr LONG MSG_SZ = 56;                // TAMANHO maximo 
+    constexpr LONG MSG_SZ = 56;                // TAMANHO maximo, considerando o \0
 
 #define ATR_B2_NAME L"Local\\ATR.MAP.B2"   // nome do mapeamento de L2
     constexpr LONG B2_CAP = 100;                // capacidade da L2
-    constexpr LONG MSG_SZ_11 = 47;             // Mensagens de granulometria tem tamanho menor
+    constexpr LONG MSG_SZ_11 = 48;             // Mensagens de granulometria tem tamanho menor, tambêm deve considerar o \0
 
 
 #pragma pack(push, 1)
