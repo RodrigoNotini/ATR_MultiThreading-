@@ -150,9 +150,11 @@ static bool pull_L1_blocking(const char* consumidor_tag, HANDLE evtRun) {
 
         // 5) Roteamento básico por prefixo
         if (msg.rfind("44/", 0) == 0) {
-            // MSG44 → Exibição (Pipe na etapa 2)
+            if (atr::send_message(atr::hNamedPipe,msg)==TRUE) {
+                std::cout<< "[consumidor " << consumidor_tag << "] "
+					<< "Mensagem enviada ao named pipe com sucesso.\n";
+            }
             atr::log_info(consumidor_tag, "roteado: MSG44 para exibicao");
-            // TODO: enviar para exibicao
         }
         else if (msg.rfind("11/", 0) == 0) {
 			if(!push_L2_blocking(msg, consumidor_tag, atr::g_evtRunCaptura)) return false; // Se ocorreu quit durante push, sai.
@@ -193,7 +195,8 @@ DWORD WINAPI thr_msg_capture(LPVOID) {
 
 int main() {
     atr::open_child_kernels(); // abre/cria objetos kernel compartilhados
-
+	atr::connect_namedpipe(); // conecta named pipe com exibicao
+    
     HANDLE hCapture = CreateThread(nullptr, 0, thr_msg_capture, nullptr, 0, nullptr);
     DWORD n = 0;
     if (hCapture) n++;
@@ -202,5 +205,6 @@ int main() {
     }
     if (hCapture) CloseHandle(hCapture); // fecha handle
     atr::close_child_kernels(); // fecha objetos kernel
+	atr::close_namedpipe(); // fecha named pipe
     return 0;
 }

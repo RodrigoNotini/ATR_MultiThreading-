@@ -29,12 +29,23 @@ namespace atr {
 	extern HANDLE g_evtClearExibicao;
 	extern HANDLE g_evtQuitAll;
 
+	extern const wchar_t* NamedPipePath;
+	extern const wchar_t* MailSlotPath;
 	extern HANDLE hMailSlot;
+	extern HANDLE hNamedPipe;
 	
 
 	// Função de inicialização e limpeza
+	
 	void init_globals();
 	void init_mailslot();
+	void close_mailslot();
+	void init_namedpipe();
+	void connect_namedpipe();
+	bool send_message(HANDLE pipe, std::string msg);
+	bool recv_message_nonblock(HANDLE pipe,std::string& out);
+	bool recv_message_blocking(HANDLE pipe,std::string& out);
+	void close_namedpipe();
 	void write_mailslot_clear();
 	void cleanup_globals();
 	void open_child_kernels();

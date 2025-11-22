@@ -1,9 +1,9 @@
-#include "globals.hpp"
+﻿#include "globals.hpp"
 #include <iostream>
 
 namespace atr {
 
-    // ===== Vari�veis globais =====
+    // ===== Variáveis globais =====
     HANDLE g_semItems_L1 = nullptr;
     HANDLE g_semSpaces_L1 = nullptr;
     HANDLE mutexL1 = nullptr;
@@ -25,8 +25,10 @@ namespace atr {
 	HANDLE g_hMapB2 = nullptr;
 	SharedRing* g_B2 = nullptr;
 
+	const wchar_t* NamedPipePath = L"\\\\.\\pipe\\CapturaNamedPipe";
     const wchar_t* MailSlotPath = L"\\\\.\\mailslot\\TecladoMailSlot";
     HANDLE hMailSlot = nullptr;
+	HANDLE hNamedPipe = nullptr;
 
     // ===== Launcher =====
     void init_globals() {
@@ -49,13 +51,13 @@ namespace atr {
         g_B1 = reinterpret_cast<SharedRing*>(
             MapViewOfFile(g_hMapB1, FILE_MAP_ALL_ACCESS, 0, 0, 0)
             );
-		// Checagem de erro na atribui��o de valor � g_B1
+		// Checagem de erro na atribuição de valor à g_B1
         if (!g_B1) {
             std::cerr << "[globals] ERRO MapViewOfFile(B1): " << GetLastError() << "\n";
             CloseHandle(g_hMapB1); g_hMapB1 = nullptr;
             ExitProcess(1);
         }
-		// Se n�o existia antes, inicializa o layout
+		// Se não existia antes, inicializa o layout
         if (created_new) {
             ZeroMemory(g_B1, total);
             g_B1->hdr.capacity = B1_CAP;
@@ -82,7 +84,7 @@ namespace atr {
         g_B2 = reinterpret_cast<SharedRing*>(
             MapViewOfFile(g_hMapB2, FILE_MAP_ALL_ACCESS, 0, 0, 0)
             );
-		// Checagem de erro na atribui��o de valor � g_B2
+		// Checagem de erro na atribuição de valor à g_B2
         if (!g_B2) {
             std::cerr << "[globals] ERRO MapViewOfFile(B2): " << GetLastError() << "\n";
             CloseHandle(g_hMapB2); g_hMapB2 = nullptr;
@@ -125,9 +127,9 @@ namespace atr {
         g_evtRunAnalise = CreateEvent(nullptr, TRUE, TRUE, L"Local\\ATR.EVT.RUN.ANALISE");
         g_evtQuitAll = CreateEvent(nullptr, TRUE, FALSE, L"Local\\ATR.EVT.QUITALL");
 
-        //MailSlot que enviar� mensagem de clear para exibi��o
+        //MailSlot que enviará mensagem de clear para exibição
 
-        // MailSlot que ser� criado para enviar 
+        // MailSlot que será criado para enviar 
 
         if (!g_evtRunMedicao || !g_evtRunCLP || !g_evtRunCaptura || !g_evtRunExibicao ||
             !g_evtRunAnalise ||!g_evtQuitAll) {
@@ -154,37 +156,197 @@ namespace atr {
 
 	}
 
-    void write_mailslot_clear() { // Envia clear por meio de mailslot
-        const char* clear_msg = "CLEAR";
-        DWORD bytesWritten = 0;
-        HANDLE hFile = CreateFileW( // Abre o mailslot e obtem HANDLE hfile para processo diferente, no caso ser� teclado
-            MailSlotPath,
-            GENERIC_WRITE,
-            FILE_SHARE_READ,
-            nullptr,
-            OPEN_EXISTING,
-            FILE_ATTRIBUTE_NORMAL,
-            nullptr
-		);
-        if (hFile == INVALID_HANDLE_VALUE) {
-            std::cerr << "[globals] ERRO CreateFileW para mailslot: " << GetLastError() << "\n";
-            return;
+    void close_mailslot(){
+        if (hMailSlot) {
+            CloseHandle(hMailSlot);
+            hMailSlot = nullptr;
+            std::cout << "[globals] Mailslot fechado com sucesso\n";
         }
-		BOOL result = WriteFile( // Escreve a mensagem CLEAR no mailslot
-            hFile,
-            clear_msg,
-            DWORD(strlen(clear_msg)),
+	} // Pode ser usada tanto para teclado quanto para exibicao
+
+    void init_namedpipe() {
+        hNamedPipe = CreateNamedPipeW(
+            NamedPipePath,
+            PIPE_ACCESS_DUPLEX,
+            PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT,
+            PIPE_UNLIMITED_INSTANCES, // Instancias ilimitadas, porem precisa so de uma
+            512, // (Servidor -> Cliente) (exibicao -> captura)
+			512, // (Cliente -> Servidor) (captura -> exibicao)
+            0,   
+            nullptr 
+		);
+        if (hNamedPipe == INVALID_HANDLE_VALUE) {
+            std::cerr << "[globals] ERRO CreateNamedPipeW: " << GetLastError() << "\n";
+            ExitProcess(1);
+        }
+		std::cout << "[globals] Named Pipe criado com sucesso, aguardando conexao do cliente...\n";
+        BOOL fConnected = FALSE;
+
+        BOOL ok = ConnectNamedPipe(hNamedPipe, NULL);
+        if (ok) {
+            // Cliente conectou depois que você entrou em ConnectNamedPipe
+			std::cout << "Cliente conectado ao named pipe com sucesso!\n";//debbug message
+            fConnected = TRUE;
+        }
+        else {
+            DWORD err = GetLastError();
+            if (err == ERROR_PIPE_CONNECTED) {
+                // Cliente conectou no intervalo entre CreateNamedPipe e ConnectNamedPipe
+                // → a conexão JÁ está estabelecida, é só seguir usando hPipe
+                fConnected = TRUE;
+				std::cout << "Cliente já estava conectado ao named pipe!\n";//debbug message
+            }
+            else {
+                // Aqui sim é erro de verdade
+                wprintf(L"[server] ConnectNamedPipe falhou: %lu\n", err);
+                CloseHandle(hNamedPipe);
+                return;
+            }
+        }
+	}//Inicializa o named_pipe e aguarda a conexão do cliente, nesse caso exibicao agurda captura
+
+    void connect_namedpipe() {
+        while (true) {
+            hNamedPipe = CreateFileW(
+                NamedPipePath,
+                GENERIC_READ | GENERIC_WRITE,
+                0,
+                nullptr,
+                OPEN_EXISTING,
+                FILE_ATTRIBUTE_NORMAL,
+                nullptr
+            );
+
+            if (hNamedPipe != INVALID_HANDLE_VALUE) {
+                std::cout << "[globals] Cliente conectado ao NamedPipe com sucesso!\n";
+                return;
+            }
+
+            DWORD err = GetLastError();
+            if (err == ERROR_FILE_NOT_FOUND) {
+                std::cerr << "[globals] Pipe ainda não existe (ERROR_FILE_NOT_FOUND), tentando de novo em 500 ms...\n";
+                Sleep(500);
+                continue;
+            }
+            else if (err == ERROR_PIPE_BUSY) {
+                std::cerr << "[globals] Pipe ocupado (ERROR_PIPE_BUSY), esperando...\n";
+                if (!WaitNamedPipeW(NamedPipePath, 5000)) {
+                    std::cerr << "[globals] WaitNamedPipeW falhou/timeout: " << GetLastError() << "\n";
+                }
+                continue;
+            }
+            else {
+                std::cerr << "[globals] ERRO CreateFileW para NamedPipe: " << err << "\n";
+                return;
+            }
+        }
+    }
+
+
+    bool send_message(HANDLE pipe,std::string msg) {
+      
+
+        // Enviar no pipe
+        DWORD bytesWritten = 0;
+        BOOL ok = WriteFile(
+            pipe,
+            msg.data(),                // ponteiro para os bytes
+            (DWORD)msg.size(),         // quantidade de bytes
             &bytesWritten,
             nullptr
         );
-        if (!result) {
-            std::cerr << "[globals] ERRO WriteFile para mailslot: " << GetLastError() << "\n";
-        }
-        else {
-            std::cout << "[globals] Mensagem CLEAR enviada ao mailslot (" << bytesWritten << " bytes)\n";
-        }
-	}
 
+        return ok && bytesWritten == msg.size();
+    }
+    //Versão bloqueante chamada quando existe alguma mensagem no Pipe
+    bool recv_message_blocking(HANDLE pipe,std::string& out) {
+        char buffer[512];            // mesmo tamanho do buffer do pipe
+        DWORD bytesRead = 0;
+
+        BOOL ok = ReadFile(
+            pipe,
+            buffer,
+            sizeof(buffer),
+            &bytesRead,
+            nullptr
+        );
+
+        if (!ok || bytesRead == 0) {
+            DWORD err = GetLastError();
+            std::cerr << "[exibicao] ReadFile no pipe falhou: " << err << "\n";
+            return false;
+        }
+
+        out.assign(buffer, buffer + bytesRead);
+        return true;
+    }
+
+    // Versão *não bloqueante*: só lê se tiver dados
+    bool recv_message_nonblock(HANDLE pipe,std::string& out) {
+        DWORD bytesAvail = 0;
+        BOOL ok = PeekNamedPipe(
+            pipe,
+            nullptr,
+            0,
+            nullptr,
+            &bytesAvail,
+            nullptr
+        );
+
+        if (!ok) {
+            std::cerr << "[exibicao] PeekNamedPipe falhou: " << GetLastError() << "\n";
+            return false;
+        }
+
+        if (bytesAvail == 0) {
+            // Nenhuma mensagem pendente
+            return false;
+        }
+
+        // Já sabemos que tem dados -> agora fazemos a leitura “normal”
+        return recv_message_blocking(pipe,out);
+    }
+
+
+    void close_namedpipe() {
+        if (hNamedPipe) {
+            CloseHandle(hNamedPipe);
+            hNamedPipe = nullptr;
+            std::cout << "[globals] Named Pipe fechado com sucesso\n";
+        }
+    }
+
+        void write_mailslot_clear() { // Envia clear por meio de mailslot
+            const char* clear_msg = "CLEAR";
+            DWORD bytesWritten = 0;
+            HANDLE hFile = CreateFileW( // Abre o mailslot e obtem HANDLE hfile para processo diferente, no caso será teclado
+                MailSlotPath,
+                GENERIC_WRITE,
+                FILE_SHARE_READ,
+                nullptr,
+                OPEN_EXISTING,
+                FILE_ATTRIBUTE_NORMAL,
+                nullptr
+            );
+            if (hFile == INVALID_HANDLE_VALUE) {
+                std::cerr << "[globals] ERRO CreateFileW para mailslot: " << GetLastError() << "\n";
+                return;
+            }
+            BOOL result = WriteFile( // Escreve a mensagem CLEAR no mailslot
+                hFile,
+                clear_msg,
+                DWORD(strlen(clear_msg)),
+                &bytesWritten,
+                nullptr
+            );
+            if (!result) {
+                std::cerr << "[globals] ERRO WriteFile para mailslot: " << GetLastError() << "\n";
+            }
+            else {
+                std::cout << "[globals] Mensagem CLEAR enviada ao mailslot (" << bytesWritten << " bytes)\n";
+            }
+        }
+    
 
     void cleanup_globals() {
         // Fechar sync/eventos
@@ -231,7 +393,7 @@ namespace atr {
 
         // validar layout
         if (g_B1->hdr.capacity != B1_CAP || g_B1->hdr.msg_size != MSG_SZ) {
-            std::cerr << "[globals childs] ERRO: SharedRing B1 par�metros inesperados!\n";
+            std::cerr << "[globals childs] ERRO: SharedRing B1 parâmetros inesperados!\n";
             ExitProcess(1);
         }
 		// Abrir mapping L2 e mapear a view
@@ -250,7 +412,7 @@ namespace atr {
             ExitProcess(1);
         }
         if (g_B2->hdr.capacity != B2_CAP || g_B2->hdr.msg_size != MSG_SZ_11) {
-            std::cerr << "[globals childs] ERRO: SharedRing B2 par�metros inesperados!\n";
+            std::cerr << "[globals childs] ERRO: SharedRing B2 parâmetros inesperados!\n";
             ExitProcess(1);
         }
 
